@@ -2,6 +2,7 @@ import serial
 import struct
 import time
 import threading
+import argparse
 
 class ReadThread(threading.Thread):
     def __init__(self, id, name, ser):
@@ -10,35 +11,34 @@ class ReadThread(threading.Thread):
         self.name = name
         self.ser = ser
 
-    def run(self, ser):
-        while True:
-            try:
+    def run(self):
+        try:
+            while True:
                 head = self.ser.read(1)
                 if len(head) < 1 or head[0] != 0x55:
                     continue
                 length = self.ser.read(1)
                 package = self.ser.read(length[0])
-                handlePackage(package)
+                self.handlePackage(package)
                 time.sleep(0.01)
-            except:
-                print("something is wrong in read thread, exit!")
-                break
+        except Exception as e:
+            print("read thread exit!")
 
     def handlePackage(self, pac):
         if pac[0] == 1: # IMU
-            orientation = struct.unpack('3f', pac[1:])
-            print('Orientation, Yaw: %f, Pitch: %f, Roll: %f' % orientation)
+            orientation = struct.unpack('9f', pac[1:])
+            print('Orientation, Yaw: %f, Pitch: %f, Roll: %f' % (orientation[3], orientation[4], orientation[5]))
         elif pac[0] == 2: # ultrasonic
             distance = struct.unpack('f', pac[1:])
-            print('Distance: %f'%distance)
+            print('Distance: %.2f'%distance)
         elif pac[0] == 6: # battery info
             batinfo = struct.unpack('5fi', pac[1:])
-            print('Battery, charge: %d, health: %.2f, full: %.2f, remain: %.2f, voltage: %.2f, current: %.2f'%batinfo)
+            print('Battery, health: %.2f, full: %.2f, remain: %.2f, voltage: %.2f, current: %.2f, charge: %d'%batinfo)
         elif pac[0] == 7: # device info
             devinfo = struct.unpack('5I', pac[1:])
             print('Device, uid: %u, firmware version: %u.%u, hardware version: %u.%u'%devinfo)
         elif pac[0] == 10: # key event
-            keyinfo = struck.unpack('2B', pac[1:])
+            keyinfo = struct.unpack('2B', pac[1:])
             if keyinfo[1] == 1:
                 print('key %d is pressed!'%keyinfo[0])
             else:
@@ -56,25 +56,29 @@ class WriteThread(threading.Thread):
         self.ser = ser
 
     def run(self):
-        while True:
-            try:
+        try:
+            while True:
                 self.ser.write(self.naxi)
-                time.sleep(0.02)
+                time.sleep(0.5)
                 self.ser.write(self.range) 
-                time.sleep(0.02)
-            except:
-                print('something is wrong in write thread, exit!')
-                break
+                time.sleep(0.5)
+        except:
+            print('write thread exit!')
         
 if __name__ == '__main__':
-    try:
-        vcom = serial.Serial('COM12', 115200)
-    except Exception as e:
-        print('Error: serial open faild')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('port', help='serial port')
+    args = parser.parse_args()
+    port = args.port
+    vcom = serial.Serial(port, 115200)
     rthread = ReadThread(1, 'read_thread', vcom)                
     wthread = WriteThread(2, 'write_thread', vcom)
+    rthread.setDaemon(True)
+    wthread.setDaemon(True)
     rthread.start()
     wthread.start()
-    rthread.join()
-    wthread.join()
-    print('Exit, Bye!')
+    try: 
+        while rthread.is_alive() and wthread.is_alive():
+            pass
+    except KeyboardInterrupt as e:
+        print('exit, bye')
